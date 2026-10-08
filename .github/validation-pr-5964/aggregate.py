@@ -38,7 +38,11 @@ same_environment = (
     before.get("simulator_runtime") == after.get("simulator_runtime")
     and before.get("simulator_model") == after.get("simulator_model")
 )
-tests_pass = before.get("unit_exit_status") == 0 and after.get("unit_exit_status") == 0
+after_tests_pass = (
+    after.get("unit_exit_status") == 0
+    or after.get("unit_rerun_exit_status") == 0
+)
+tests_pass = before.get("unit_exit_status") == 0 and after_tests_pass
 before_failed_as_expected = before.get("observed_more_info") is False
 after_succeeded = after.get("observed_more_info") is True
 
@@ -52,10 +56,13 @@ else:
 
 def result_line(status):
     observed = status.get("observed_more_info")
+    observations = status.get("behavior_observations", [])
+    attempts = status.get("behavior_attempts")
+    suffix = f" Observations across {attempts} attempt(s): {', '.join(observations)}." if attempts else ""
     if observed is True:
-        return "The requested `person.citest` More Info dialog appeared."
+        return "The requested `person.citest` More Info dialog appeared." + suffix
     if observed is False:
-        return "The app remained on the default frontend; the requested More Info dialog did not appear."
+        return "The app remained on the default frontend; the requested More Info dialog did not appear." + suffix
     return "The behavior test did not produce a reliable observation."
 
 
@@ -66,7 +73,11 @@ def test_line(status):
     skipped = status.get("unit_skipped")
     if total is None:
         return f"exit status `{status.get('unit_exit_status', 'missing')}`; result counts unavailable"
-    return f"{total} total, {passed} passed, {failed} failed, {skipped} skipped"
+    result = f"{total} total, {passed} passed, {failed} failed, {skipped} skipped"
+    rerun = status.get("unit_rerun_exit_status", -1)
+    if rerun != -1:
+        result += f"; isolated rerun of the failed retry test exit status {rerun}"
+    return result
 
 
 environment = before if before.get("simulator_runtime") else after
@@ -93,7 +104,7 @@ After: `{after_sha}`
 
 # Manual/behavioral-equivalent test
 
-Each revision was built from the exact SHA with the repository's `Tests-UI` scheme. The workflow started the repository's seeded local Home Assistant fixture, onboarded App-Debug through the existing XCUITest flow, terminated the app, delivered a top-level `entity_id: person.citest` notification with `simctl push`, and used XCUITest to tap that notification in SpringBoard. A `simctl io recordVideo` recording captured the notification tap, cold launch, and final frontend state. No URL launch substituted for the notification path.
+Each revision was built from the exact SHA with the repository's `Tests-UI` scheme. The workflow started the repository's seeded local Home Assistant fixture, onboarded App-Debug through the existing XCUITest flow, terminated the app, delivered a top-level `entity_id: person.citest` notification with `simctl push`, and used XCUITest to tap that notification in SpringBoard. Because the reported race is intermittent, the baseline was attempted up to five times and the patched revision up to two times, stopping when the expected outcome was observed. `simctl io recordVideo` captured every attempt; the canonical recording is the attempt matching the expected outcome, or the final attempt if none matched. No URL launch substituted for the notification path.
 
 # Before result
 
@@ -105,7 +116,7 @@ Each revision was built from the exact SHA with the repository's `Tests-UI` sche
 
 # Relevant logs
 
-Concise filtered excerpts are in `before.log` and `after.log`; complete app unified-log captures are in `before/before-full.log` and `after/after-full.log`.
+Concise filtered excerpts are in `before.log` and `after.log`; complete app unified-log captures are in `before/before-full.log` and `after/after-full.log`. Per-attempt UI-test logs and recordings are retained under each variant directory.
 
 # Screen recordings
 

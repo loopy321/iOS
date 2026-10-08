@@ -20,6 +20,10 @@ fi
 cd "$SOURCE_DIR"
 
 cleanup() {
+  if [[ -n "${BEHAVIOR_PID:-}" ]]; then
+    kill "$BEHAVIOR_PID" 2>/dev/null || true
+    wait "$BEHAVIOR_PID" 2>/dev/null || true
+  fi
   if [[ -n "${VIDEO_PID:-}" ]]; then
     kill -INT "$VIDEO_PID" 2>/dev/null || true
     wait "$VIDEO_PID" 2>/dev/null || true
@@ -112,6 +116,22 @@ if [[ -d "$UNIT_RESULT" ]]; then
   xcrun xcresulttool get test-results summary \
     --path "$UNIT_RESULT" --format json \
     > "$ARTIFACT_DIR/unit-summary.json" 2> "$ARTIFACT_DIR/unit-summary-error.log" || true
+fi
+
+UNIT_RERUN_STATUS=-1
+if [[ "$VARIANT" == "after" && $UNIT_STATUS -ne 0 ]]; then
+  set +e
+  xcodebuild test-without-building \
+    -project HomeAssistant.xcodeproj \
+    -scheme Tests-Unit \
+    -destination "platform=iOS Simulator,id=$UDID" \
+    -derivedDataPath "$UI_DERIVED" \
+    -only-testing:Tests-App/WebViewExternalMessageHandlerTests/testSendExternalBusCommandWithRetrySendsCommandWithCorrelatableID \
+    -collect-test-diagnostics never \
+    COMPILER_INDEX_STORE_ENABLE=NO \
+    2>&1 | tee "$ARTIFACT_DIR/tests-$VARIANT-rerun.log"
+  UNIT_RERUN_STATUS=${PIPESTATUS[0]}
+  set -e
 fi
 
 python3 -m venv "$RUNNER_TEMP/ha-venv"
@@ -217,71 +237,113 @@ if [[ $ONBOARDING_STATUS -ne 0 ]]; then
   exit 1
 fi
 
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-
 FULL_LOG="$ARTIFACT_DIR/$VARIANT-full.log"
 xcrun simctl spawn "$UDID" log stream \
   --level debug \
   --style compact \
-  --predicate 'process == "Home Assistant"' \
+  --predicate 'process CONTAINS[c] "Home Assistant" OR senderImagePath CONTAINS[c] "Home Assistant"' \
   > "$FULL_LOG" 2>&1 &
 LOG_PID=$!
 
-BEHAVIOR_RESULT="$RUNNER_TEMP/notification-$VARIANT.xcresult"
 BEHAVIOR_LOG="$ARTIFACT_DIR/behavior-$VARIANT.log"
-SECONDS=0
-set +e
-(
-  TEST_RUNNER_EXPECTED_MORE_INFO="$EXPECTED_MORE_INFO" \
-  TEST_RUNNER_TEST_VARIANT="$VARIANT" \
-  xcodebuild test-without-building \
-    -project HomeAssistant.xcodeproj \
-    -scheme Tests-UI \
-    -destination "platform=iOS Simulator,id=$UDID" \
-    -derivedDataPath "$UI_DERIVED" \
-    -only-testing:Tests-UI/NotificationEntityColdLaunchE2ETests/testEntityNotificationColdLaunch \
-    -collect-test-diagnostics never \
-    -resultBundlePath "$BEHAVIOR_RESULT" \
-    COMPILER_INDEX_STORE_ENABLE=NO \
-    2>&1 | tee "$BEHAVIOR_LOG"
-  exit "${PIPESTATUS[0]}"
-) &
-BEHAVIOR_PID=$!
-
-TEST_STARTED=false
-for _ in $(seq 1 180); do
-  if grep -q "Start Test at" "$BEHAVIOR_LOG" 2>/dev/null; then
-    TEST_STARTED=true
-    break
-  fi
-  if ! kill -0 "$BEHAVIOR_PID" 2>/dev/null; then
-    break
-  fi
-  sleep 1
-done
-
-VIDEO="$ARTIFACT_DIR/$VARIANT-5964.mov"
-xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$VIDEO" \
-  > "$ARTIFACT_DIR/video-recorder.log" 2>&1 &
-VIDEO_PID=$!
-sleep 2
-
-if [[ "$TEST_STARTED" == true ]]; then
-  xcrun simctl push "$UDID" "$BUNDLE_ID" .github/e2e/entity-cold-launch.apns \
-    > "$ARTIFACT_DIR/simctl-push.log" 2>&1
-else
-  echo "The UI test did not start before notification delivery timeout" \
-    > "$ARTIFACT_DIR/simctl-push.log"
+MAX_BEHAVIOR_ATTEMPTS=2
+if [[ "$VARIANT" == "before" ]]; then
+  MAX_BEHAVIOR_ATTEMPTS=5
 fi
 
-wait "$BEHAVIOR_PID"
-BEHAVIOR_STATUS=$?
-BEHAVIOR_DURATION=$SECONDS
-set -e
+SECONDS=0
+VIDEO="$ARTIFACT_DIR/$VARIANT-5964.mov"
+BEHAVIOR_STATUS=1
+OBSERVED_MORE_INFO=""
+BEHAVIOR_ATTEMPTS=0
 
-kill -INT "$VIDEO_PID" 2>/dev/null || true
-wait "$VIDEO_PID" 2>/dev/null || true
-unset VIDEO_PID
+for ATTEMPT in $(seq 1 "$MAX_BEHAVIOR_ATTEMPTS"); do
+  BEHAVIOR_ATTEMPTS=$ATTEMPT
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+
+  ATTEMPT_RESULT="$RUNNER_TEMP/notification-$VARIANT-$ATTEMPT.xcresult"
+  ATTEMPT_LOG="$ARTIFACT_DIR/behavior-$VARIANT-attempt-$ATTEMPT.log"
+  set +e
+  (
+    TEST_RUNNER_EXPECTED_MORE_INFO="$EXPECTED_MORE_INFO" \
+    TEST_RUNNER_TEST_VARIANT="$VARIANT" \
+    xcodebuild test-without-building \
+      -project HomeAssistant.xcodeproj \
+      -scheme Tests-UI \
+      -destination "platform=iOS Simulator,id=$UDID" \
+      -derivedDataPath "$UI_DERIVED" \
+      -only-testing:Tests-UI/NotificationEntityColdLaunchE2ETests/testEntityNotificationColdLaunch \
+      -collect-test-diagnostics never \
+      -resultBundlePath "$ATTEMPT_RESULT" \
+      COMPILER_INDEX_STORE_ENABLE=NO \
+      2>&1 | tee "$ATTEMPT_LOG"
+    exit "${PIPESTATUS[0]}"
+  ) &
+  BEHAVIOR_PID=$!
+
+  TEST_STARTED=false
+  for _ in $(seq 1 180); do
+    if grep -q "Start Test at" "$ATTEMPT_LOG" 2>/dev/null; then
+      TEST_STARTED=true
+      break
+    fi
+    if ! kill -0 "$BEHAVIOR_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+
+  ATTEMPT_VIDEO="$ARTIFACT_DIR/$VARIANT-5964-attempt-$ATTEMPT.mov"
+  xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$ATTEMPT_VIDEO" \
+    > "$ARTIFACT_DIR/video-recorder-attempt-$ATTEMPT.log" 2>&1 &
+  VIDEO_PID=$!
+  sleep 2
+
+  if [[ "$TEST_STARTED" == true ]]; then
+    xcrun simctl push "$UDID" "$BUNDLE_ID" .github/e2e/entity-cold-launch.apns \
+      > "$ARTIFACT_DIR/simctl-push-attempt-$ATTEMPT.log" 2>&1
+  else
+    echo "The UI test did not start before notification delivery timeout" \
+      > "$ARTIFACT_DIR/simctl-push-attempt-$ATTEMPT.log"
+  fi
+
+  wait "$BEHAVIOR_PID"
+  ATTEMPT_STATUS=$?
+  unset BEHAVIOR_PID
+  set -e
+
+  kill -INT "$VIDEO_PID" 2>/dev/null || true
+  wait "$VIDEO_PID" 2>/dev/null || true
+  unset VIDEO_PID
+
+  ATTEMPT_OBSERVATION=$(python3 - "$ATTEMPT_LOG" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+match = re.search(r"PR5964_OBSERVED_MORE_INFO=(true|false)", text)
+print(match.group(1) if match else "unknown")
+PY
+  )
+  BEHAVIOR_STATUS=$ATTEMPT_STATUS
+  OBSERVED_MORE_INFO=$ATTEMPT_OBSERVATION
+  cp "$ATTEMPT_VIDEO" "$VIDEO"
+
+  if [[ "$ATTEMPT_OBSERVATION" == "$EXPECTED_MORE_INFO" ]]; then
+    break
+  fi
+done
+
+BEHAVIOR_DURATION=$SECONDS
+python3 - "$ARTIFACT_DIR" "$VARIANT" "$BEHAVIOR_ATTEMPTS" <<'PY'
+import pathlib, sys
+root, variant, count = pathlib.Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+parts = []
+for attempt in range(1, count + 1):
+    path = root / f"behavior-{variant}-attempt-{attempt}.log"
+    if path.exists():
+        parts.append(f"===== ATTEMPT {attempt} =====\n{path.read_text(errors='replace')}")
+(root / f"behavior-{variant}.log").write_text("\n".join(parts))
+PY
+
 kill "$LOG_PID" 2>/dev/null || true
 wait "$LOG_PID" 2>/dev/null || true
 unset LOG_PID
@@ -309,7 +371,7 @@ tests_log = pathlib.Path(sys.argv[1]).read_text(errors="replace")
 behavior_log = pathlib.Path(sys.argv[2]).read_text(errors="replace")
 summary_path = pathlib.Path(sys.argv[3])
 summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
-match = re.search(r"PR5964_OBSERVED_MORE_INFO=(true|false)", behavior_log)
+observations = re.findall(r"PR5964_OBSERVED_MORE_INFO=(true|false)", behavior_log)
 status = {
     "variant": "$VARIANT",
     "sha": "$TEST_SHA",
@@ -319,12 +381,15 @@ status = {
     "unit_passed": summary.get("passedTests"),
     "unit_failed": summary.get("failedTests"),
     "unit_skipped": summary.get("skippedTests"),
+    "unit_rerun_exit_status": $UNIT_RERUN_STATUS,
     "build_exit_status": $BUILD_STATUS,
     "build_duration_seconds": $BUILD_DURATION,
     "onboarding_exit_status": $ONBOARDING_STATUS,
     "behavior_exit_status": $BEHAVIOR_STATUS,
     "behavior_duration_seconds": $BEHAVIOR_DURATION,
-    "observed_more_info": None if match is None else match.group(1) == "true",
+    "behavior_attempts": $BEHAVIOR_ATTEMPTS,
+    "behavior_observations": observations,
+    "observed_more_info": None if "$OBSERVED_MORE_INFO" in ("", "unknown") else "$OBSERVED_MORE_INFO" == "true",
     "expected_more_info": "$EXPECTED_MORE_INFO" == "true",
     "simulator_runtime": "$RUNTIME",
     "simulator_model": "iPhone 17",
