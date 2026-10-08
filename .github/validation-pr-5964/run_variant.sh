@@ -227,31 +227,55 @@ xcrun simctl spawn "$UDID" log stream \
   > "$FULL_LOG" 2>&1 &
 LOG_PID=$!
 
+BEHAVIOR_RESULT="$RUNNER_TEMP/notification-$VARIANT.xcresult"
+BEHAVIOR_LOG="$ARTIFACT_DIR/behavior-$VARIANT.log"
+SECONDS=0
+set +e
+(
+  TEST_RUNNER_EXPECTED_MORE_INFO="$EXPECTED_MORE_INFO" \
+  TEST_RUNNER_TEST_VARIANT="$VARIANT" \
+  xcodebuild test-without-building \
+    -project HomeAssistant.xcodeproj \
+    -scheme Tests-UI \
+    -destination "platform=iOS Simulator,id=$UDID" \
+    -derivedDataPath "$UI_DERIVED" \
+    -only-testing:Tests-UI/NotificationEntityColdLaunchE2ETests/testEntityNotificationColdLaunch \
+    -collect-test-diagnostics never \
+    -resultBundlePath "$BEHAVIOR_RESULT" \
+    COMPILER_INDEX_STORE_ENABLE=NO \
+    2>&1 | tee "$BEHAVIOR_LOG"
+  exit "${PIPESTATUS[0]}"
+) &
+BEHAVIOR_PID=$!
+
+TEST_STARTED=false
+for _ in $(seq 1 180); do
+  if grep -q "Start Test at" "$BEHAVIOR_LOG" 2>/dev/null; then
+    TEST_STARTED=true
+    break
+  fi
+  if ! kill -0 "$BEHAVIOR_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
 VIDEO="$ARTIFACT_DIR/$VARIANT-5964.mov"
 xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$VIDEO" \
   > "$ARTIFACT_DIR/video-recorder.log" 2>&1 &
 VIDEO_PID=$!
 sleep 2
 
-xcrun simctl push "$UDID" "$BUNDLE_ID" .github/e2e/entity-cold-launch.apns \
-  > "$ARTIFACT_DIR/simctl-push.log" 2>&1
+if [[ "$TEST_STARTED" == true ]]; then
+  xcrun simctl push "$UDID" "$BUNDLE_ID" .github/e2e/entity-cold-launch.apns \
+    > "$ARTIFACT_DIR/simctl-push.log" 2>&1
+else
+  echo "The UI test did not start before notification delivery timeout" \
+    > "$ARTIFACT_DIR/simctl-push.log"
+fi
 
-BEHAVIOR_RESULT="$RUNNER_TEMP/notification-$VARIANT.xcresult"
-SECONDS=0
-set +e
-TEST_RUNNER_EXPECTED_MORE_INFO="$EXPECTED_MORE_INFO" \
-TEST_RUNNER_TEST_VARIANT="$VARIANT" \
-xcodebuild test-without-building \
-  -project HomeAssistant.xcodeproj \
-  -scheme Tests-UI \
-  -destination "platform=iOS Simulator,id=$UDID" \
-  -derivedDataPath "$UI_DERIVED" \
-  -only-testing:Tests-UI/NotificationEntityColdLaunchE2ETests/testEntityNotificationColdLaunch \
-  -collect-test-diagnostics never \
-  -resultBundlePath "$BEHAVIOR_RESULT" \
-  COMPILER_INDEX_STORE_ENABLE=NO \
-  2>&1 | tee "$ARTIFACT_DIR/behavior-$VARIANT.log"
-BEHAVIOR_STATUS=${PIPESTATUS[0]}
+wait "$BEHAVIOR_PID"
+BEHAVIOR_STATUS=$?
 BEHAVIOR_DURATION=$SECONDS
 set -e
 
