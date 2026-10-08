@@ -237,6 +237,29 @@ if [[ $ONBOARDING_STATUS -ne 0 ]]; then
   exit 1
 fi
 
+PREPARATION_RESULT="$RUNNER_TEMP/preparation-$VARIANT.xcresult"
+set +e
+xcodebuild test-without-building \
+  -project HomeAssistant.xcodeproj \
+  -scheme Tests-UI \
+  -destination "platform=iOS Simulator,id=$UDID" \
+  -derivedDataPath "$UI_DERIVED" \
+  -only-testing:Tests-UI/NotificationEntityColdLaunchE2ETests/testPrepareForNotification \
+  -collect-test-diagnostics never \
+  -resultBundlePath "$PREPARATION_RESULT" \
+  COMPILER_INDEX_STORE_ENABLE=NO \
+  2>&1 | tee "$ARTIFACT_DIR/preparation-$VARIANT.log"
+PREPARATION_STATUS=${PIPESTATUS[0]}
+set -e
+
+if [[ $PREPARATION_STATUS -ne 0 ]]; then
+  echo "The app could not be prepared with an unobstructed frontend" >&2
+  exit 1
+fi
+
+open -a Simulator --args -CurrentDeviceUDID "$UDID"
+sleep 3
+
 FULL_LOG="$ARTIFACT_DIR/$VARIANT-full.log"
 xcrun simctl spawn "$UDID" log stream \
   --level debug \
@@ -256,6 +279,7 @@ VIDEO="$ARTIFACT_DIR/$VARIANT-5964.mov"
 BEHAVIOR_STATUS=1
 OBSERVED_MORE_INFO=""
 BEHAVIOR_ATTEMPTS=0
+SELECTED_LOCK_STATUS=1
 
 for ATTEMPT in $(seq 1 "$MAX_BEHAVIOR_ATTEMPTS"); do
   BEHAVIOR_ATTEMPTS=$ATTEMPT
@@ -300,9 +324,25 @@ for ATTEMPT in $(seq 1 "$MAX_BEHAVIOR_ATTEMPTS"); do
   sleep 2
 
   if [[ "$TEST_STARTED" == true ]]; then
+    set +e
+    osascript > "$ARTIFACT_DIR/lock-screen-attempt-$ATTEMPT.log" 2>&1 <<'APPLESCRIPT'
+tell application "Simulator" to activate
+delay 1
+tell application "System Events"
+  tell process "Simulator"
+    click menu item "Lock Screen" of menu "Device" of menu bar 1
+  end tell
+end tell
+APPLESCRIPT
+    LOCK_STATUS=$?
+    set -e
+    echo "exit_status=$LOCK_STATUS" >> "$ARTIFACT_DIR/lock-screen-attempt-$ATTEMPT.log"
+    sleep 2
     xcrun simctl push "$UDID" "$BUNDLE_ID" .github/e2e/entity-cold-launch.apns \
       > "$ARTIFACT_DIR/simctl-push-attempt-$ATTEMPT.log" 2>&1
   else
+    LOCK_STATUS=1
+    echo "exit_status=$LOCK_STATUS" > "$ARTIFACT_DIR/lock-screen-attempt-$ATTEMPT.log"
     echo "The UI test did not start before notification delivery timeout" \
       > "$ARTIFACT_DIR/simctl-push-attempt-$ATTEMPT.log"
   fi
@@ -325,6 +365,7 @@ PY
   )
   BEHAVIOR_STATUS=$ATTEMPT_STATUS
   OBSERVED_MORE_INFO=$ATTEMPT_OBSERVATION
+  SELECTED_LOCK_STATUS=$LOCK_STATUS
   cp "$ATTEMPT_VIDEO" "$VIDEO"
 
   if [[ "$ATTEMPT_OBSERVATION" == "$EXPECTED_MORE_INFO" ]]; then
@@ -385,11 +426,13 @@ status = {
     "build_exit_status": $BUILD_STATUS,
     "build_duration_seconds": $BUILD_DURATION,
     "onboarding_exit_status": $ONBOARDING_STATUS,
+    "preparation_exit_status": $PREPARATION_STATUS,
     "behavior_exit_status": $BEHAVIOR_STATUS,
     "behavior_duration_seconds": $BEHAVIOR_DURATION,
     "behavior_attempts": $BEHAVIOR_ATTEMPTS,
     "behavior_observations": observations,
     "observed_more_info": None if "$OBSERVED_MORE_INFO" in ("", "unknown") else "$OBSERVED_MORE_INFO" == "true",
+    "lock_screen_exit_status": $SELECTED_LOCK_STATUS,
     "expected_more_info": "$EXPECTED_MORE_INFO" == "true",
     "simulator_runtime": "$RUNTIME",
     "simulator_model": "iPhone 17",

@@ -17,11 +17,31 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 10), "The app must be stopped before the tap")
     }
 
+    func testPrepareForNotification() {
+        app.launch()
+
+        let declineLocation = app.buttons["Do not share my location"].firstMatch
+        if declineLocation.waitForExistence(timeout: 15) {
+            declineLocation.tap()
+        }
+
+        let close = app.buttons.matching(NSPredicate(format: "label ==[c] 'Close'")).firstMatch
+        if close.waitForExistence(timeout: 5) {
+            close.tap()
+        }
+
+        XCTAssertTrue(
+            app.webViews.firstMatch.waitForExistence(timeout: Timeout.frontend),
+            "The frontend was not unobstructed before the notification test"
+        )
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10))
+    }
+
     func testEntityNotificationColdLaunch() {
         let expectedMoreInfo = ProcessInfo.processInfo.environment["EXPECTED_MORE_INFO"] == "true"
         let variant = ProcessInfo.processInfo.environment["TEST_VARIANT"] ?? "unknown"
 
-        XCUIDevice.shared.press(.home)
         _ = springboard.wait(for: .runningForeground, timeout: 10)
 
         let title = springboard.staticTexts["HA PR 5964 entity test"].firstMatch

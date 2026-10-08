@@ -43,10 +43,14 @@ after_tests_pass = (
     or after.get("unit_rerun_exit_status") == 0
 )
 tests_pass = before.get("unit_exit_status") == 0 and after_tests_pass
+lock_screen_tested = (
+    before.get("lock_screen_exit_status") == 0
+    and after.get("lock_screen_exit_status") == 0
+)
 before_failed_as_expected = before.get("observed_more_info") is False
 after_succeeded = after.get("observed_more_info") is True
 
-if same_environment and tests_pass and before_failed_as_expected and after_succeeded:
+if same_environment and tests_pass and lock_screen_tested and before_failed_as_expected and after_succeeded:
     conclusion = "CONFIRMED"
 elif before_failed_as_expected and after.get("observed_more_info") is False:
     conclusion = "NOT CONFIRMED"
@@ -104,7 +108,7 @@ After: `{after_sha}`
 
 # Manual/behavioral-equivalent test
 
-Each revision was built from the exact SHA with the repository's `Tests-UI` scheme. The workflow started the repository's seeded local Home Assistant fixture, onboarded App-Debug through the existing XCUITest flow, terminated the app, delivered a top-level `entity_id: person.citest` notification with `simctl push`, and used XCUITest to tap that notification in SpringBoard. Because the reported race is intermittent, the baseline was attempted up to five times and the patched revision up to two times, stopping when the expected outcome was observed. `simctl io recordVideo` captured every attempt; the canonical recording is the attempt matching the expected outcome, or the final attempt if none matched. No URL launch substituted for the notification path.
+Each revision was built from the exact SHA with the repository's `Tests-UI` scheme. The workflow started the repository's seeded local Home Assistant fixture, onboarded App-Debug through the existing XCUITest flow, and cleared post-onboarding sheets before the test. It then terminated the app, locked the simulator through Simulator's named `Device > Lock Screen` menu, delivered a top-level `entity_id: person.citest` notification with `simctl push`, and used XCUITest to tap that notification in SpringBoard. Because the reported race is intermittent, the baseline was attempted up to five times and the patched revision up to two times, stopping when the expected outcome was observed. `simctl io recordVideo` captured every attempt; the canonical recording is the attempt matching the expected outcome, or the final attempt if none matched. No URL launch substituted for the notification path.
 
 # Before result
 
