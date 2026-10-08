@@ -89,6 +89,7 @@ xcodebuild -resolvePackageDependencies \
   -scheme Tests-Unit \
   > "$ARTIFACT_DIR/package-resolution.log" 2>&1
 
+UI_DERIVED="$HOME/Library/Developer/Xcode/DerivedData/PR5964-$VARIANT"
 UNIT_RESULT="$RUNNER_TEMP/Tests-Unit-$VARIANT.xcresult"
 SECONDS=0
 set +e
@@ -96,6 +97,7 @@ xcodebuild test \
   -project HomeAssistant.xcodeproj \
   -scheme Tests-Unit \
   -destination "platform=iOS Simulator,id=$UDID" \
+  -derivedDataPath "$UI_DERIVED" \
   -only-testing:Tests-App/WebViewControllerTests \
   -only-testing:Tests-App/WebViewExternalMessageHandlerTests \
   -collect-test-diagnostics never \
@@ -147,7 +149,6 @@ xcrun simctl erase "$UDID"
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" -b
 
-UI_DERIVED="$HOME/Library/Developer/Xcode/DerivedData/PR5964-$VARIANT"
 SECONDS=0
 set +e
 xcodebuild build-for-testing \

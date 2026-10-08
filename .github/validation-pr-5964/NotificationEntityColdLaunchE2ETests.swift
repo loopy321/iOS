@@ -73,11 +73,17 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
 
         guard !app.wait(for: .runningForeground, timeout: 5) else { return }
 
-        let open = springboard.buttons["Open"].firstMatch
+        let open = springboard.descendants(matching: .any).matching(
+            NSPredicate(format: "label ==[c] 'Open' OR identifier ==[c] 'Open' OR value ==[c] 'Open'")
+        ).firstMatch
         if open.waitForExistence(timeout: 2) {
             open.tap()
         } else if title.exists {
-            title.doubleTap()
+            // iOS 27 can render the visible swipe action without exposing it as an accessibility element.
+            let openCoordinate = springboard.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: max(24, title.frame.minX / 2), dy: title.frame.midY)
+            )
+            openCoordinate.tap()
         }
     }
 
