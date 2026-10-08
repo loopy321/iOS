@@ -257,7 +257,7 @@ if [[ $PREPARATION_STATUS -ne 0 ]]; then
   exit 1
 fi
 
-open -a Simulator --args -CurrentDeviceUDID "$UDID"
+open "$DEVELOPER_DIR/Applications/Simulator.app" --args -CurrentDeviceUDID "$UDID"
 sleep 3
 
 FULL_LOG="$ARTIFACT_DIR/$VARIANT-full.log"
@@ -326,10 +326,10 @@ for ATTEMPT in $(seq 1 "$MAX_BEHAVIOR_ATTEMPTS"); do
   if [[ "$TEST_STARTED" == true ]]; then
     set +e
     osascript > "$ARTIFACT_DIR/lock-screen-attempt-$ATTEMPT.log" 2>&1 <<'APPLESCRIPT'
-tell application "Simulator" to activate
-delay 1
 tell application "System Events"
   tell process "Simulator"
+    set frontmost to true
+    delay 1
     click menu item "Lock Screen" of menu "Device" of menu bar 1
   end tell
 end tell
