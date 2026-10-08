@@ -28,7 +28,7 @@ jobs:
     needs: prepare
     name: ${{ matrix.variant }} (${{ matrix.sha }})
     runs-on: xcode-27
-    timeout-minutes: 150
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +63,7 @@ jobs:
         name: Restore DerivedData
         with:
           path: ~/Library/Developer/Xcode/DerivedData
-          key: pr-5964-${{ matrix.sha }}-${{ hashFiles('source/Package.resolved') }}
+          key: pr-5964-v2-${{ matrix.sha }}-${{ hashFiles('source/Package.resolved') }}
           restore-keys: pr-5964-
 
       - name: Build, test, and record cold launch

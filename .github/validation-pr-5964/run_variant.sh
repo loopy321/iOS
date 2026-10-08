@@ -98,6 +98,7 @@ xcodebuild test \
   -destination "platform=iOS Simulator,id=$UDID" \
   -only-testing:Tests-App/WebViewControllerTests \
   -only-testing:Tests-App/WebViewExternalMessageHandlerTests \
+  -collect-test-diagnostics never \
   -resultBundlePath "$UNIT_RESULT" \
   COMPILER_INDEX_STORE_ENABLE=NO \
   2>&1 | tee "$ARTIFACT_DIR/tests-$VARIANT.log"
@@ -146,7 +147,7 @@ xcrun simctl erase "$UDID"
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" -b
 
-UI_DERIVED="$RUNNER_TEMP/DerivedData-$VARIANT"
+UI_DERIVED="$HOME/Library/Developer/Xcode/DerivedData/PR5964-$VARIANT"
 SECONDS=0
 set +e
 xcodebuild build-for-testing \
@@ -203,6 +204,7 @@ xcodebuild test-without-building \
   -destination "platform=iOS Simulator,id=$UDID" \
   -derivedDataPath "$UI_DERIVED" \
   -only-testing:Tests-UI/OnboardingE2ETests/testOnboardingConnectsAndFrontendOpensNativeSettings \
+  -collect-test-diagnostics never \
   -resultBundlePath "$ONBOARDING_RESULT" \
   COMPILER_INDEX_STORE_ENABLE=NO \
   2>&1 | tee "$ARTIFACT_DIR/onboarding-$VARIANT.log"
@@ -244,6 +246,7 @@ xcodebuild test-without-building \
   -destination "platform=iOS Simulator,id=$UDID" \
   -derivedDataPath "$UI_DERIVED" \
   -only-testing:Tests-UI/NotificationEntityColdLaunchE2ETests/testEntityNotificationColdLaunch \
+  -collect-test-diagnostics never \
   -resultBundlePath "$BEHAVIOR_RESULT" \
   COMPILER_INDEX_STORE_ENABLE=NO \
   2>&1 | tee "$ARTIFACT_DIR/behavior-$VARIANT.log"

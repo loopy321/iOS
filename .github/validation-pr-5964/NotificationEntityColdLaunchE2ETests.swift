@@ -30,7 +30,7 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         }
 
         XCTAssertTrue(title.waitForExistence(timeout: Timeout.notification), springboard.debugDescription)
-        title.tap()
+        tapNotification(title: title)
 
         XCTAssertTrue(
             app.wait(for: .runningForeground, timeout: Timeout.app),
@@ -61,6 +61,24 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         let start = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
         let end = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
         start.press(forDuration: 0.1, thenDragTo: end)
+    }
+
+    private func tapNotification(title: XCUIElement) {
+        let shortLook = springboard.otherElements["NotificationShortLookView"].firstMatch
+        if shortLook.waitForExistence(timeout: 2) {
+            shortLook.tap()
+        } else {
+            title.tap()
+        }
+
+        guard !app.wait(for: .runningForeground, timeout: 5) else { return }
+
+        let open = springboard.buttons["Open"].firstMatch
+        if open.waitForExistence(timeout: 2) {
+            open.tap()
+        } else if title.exists {
+            title.doubleTap()
+        }
     }
 
     private func waitForMoreInfo(in webView: XCUIElement, timeout: TimeInterval) -> Bool {
