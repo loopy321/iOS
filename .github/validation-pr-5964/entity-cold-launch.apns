@@ -1,0 +1,10 @@
+{
+  "aps": {
+    "alert": {
+      "title": "HA PR 5964 entity test",
+      "body": "Open CITest"
+    },
+    "sound": "default"
+  },
+  "entity_id": "person.citest"
+}
