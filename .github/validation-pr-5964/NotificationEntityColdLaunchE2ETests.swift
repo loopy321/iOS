@@ -24,6 +24,19 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         let declineLocation = app.buttons["Do not share my location"].firstMatch
         if declineLocation.waitForExistence(timeout: 15) {
             declineLocation.tap()
+
+            let lessSecure = app.buttons["onboarding.localAccess.option.lessSecure"].firstMatch
+            XCTAssertTrue(lessSecure.waitForExistence(timeout: 15), "The local access choice did not appear")
+            lessSecure.tap()
+
+            let next = app.buttons["onboarding.localAccess.next"].firstMatch
+            XCTAssertTrue(next.waitForExistence(timeout: 5), "The local access next button did not appear")
+            next.tap()
+
+            let denyLocation = springboard.buttons["Don’t Allow"].firstMatch
+            if denyLocation.waitForExistence(timeout: 10) {
+                denyLocation.tap()
+            }
         }
 
         let close = app.buttons.matching(NSPredicate(format: "label ==[c] 'Close'")).firstMatch
@@ -34,6 +47,15 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         XCTAssertTrue(
             app.webViews.firstMatch.waitForExistence(timeout: Timeout.frontend),
             "The frontend was not unobstructed before the notification test"
+        )
+        XCTAssertFalse(declineLocation.exists, "The permissions flow remained over the frontend")
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10))
+
+        app.launch()
+        XCTAssertFalse(
+            declineLocation.waitForExistence(timeout: 10),
+            "The permissions flow returned after relaunch"
         )
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 10))
@@ -87,15 +109,27 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         defer { dlclose(handle) }
 
         guard let portSymbol = dlsym(handle, "SBSSpringBoardServerPort"),
-              let lockSymbol = dlsym(handle, "SBSLockDevice") else { return false }
+              let lockSymbol = dlsym(handle, "SBSLockDevice"),
+              let statusSymbol = dlsym(handle, "SBSGetScreenLockStatus") else { return false }
 
         typealias ServerPort = @convention(c) () -> UInt32
         typealias LockDevice = @convention(c) (UInt32) -> Int32
+        typealias GetScreenLockStatus = @convention(c) (
+            UInt32,
+            UnsafeMutablePointer<ObjCBool>,
+            UnsafeMutablePointer<ObjCBool>
+        ) -> Int32
         let serverPort = unsafeBitCast(portSymbol, to: ServerPort.self)
         let lockDevice = unsafeBitCast(lockSymbol, to: LockDevice.self)
-        let result = lockDevice(serverPort())
+        let getScreenLockStatus = unsafeBitCast(statusSymbol, to: GetScreenLockStatus.self)
+        let port = serverPort()
+        let lockResult = lockDevice(port)
         Thread.sleep(forTimeInterval: 1)
-        return result == 0
+        var locked: ObjCBool = false
+        var passcodeEnabled: ObjCBool = false
+        let statusResult = getScreenLockStatus(port, &locked, &passcodeEnabled)
+        print("PR5964_LOCK_STATUS=\(locked.boolValue) passcode=\(passcodeEnabled.boolValue)")
+        return lockResult == 0 && statusResult == 0 && locked.boolValue
     }
 
     private func openNotificationCenter() {
