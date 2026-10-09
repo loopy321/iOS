@@ -85,6 +85,23 @@ def test_line(status):
 
 
 environment = before if before.get("simulator_runtime") else after
+recordings = (
+    "- `before-5964.mov`\n- `after-5964.mov`"
+    if lock_screen_tested
+    else "No valid locked before/after recording pair was produced. Any retained `.mov` files are diagnostic only."
+)
+if conclusion == "CONFIRMED":
+    suggested_comment = (
+        f"Tested the exact PR base `{before_sha}` and head `{after_sha}` on an Apple-silicon GitHub "
+        "Actions `xcode-27` runner. The bug reproduced before and the same locked notification test "
+        "succeeded after; focused tests passed. See the attached before/after recordings."
+    )
+else:
+    suggested_comment = (
+        f"Tested the exact PR base `{before_sha}` and head `{after_sha}` on an Apple-silicon GitHub "
+        f"Actions `xcode-27` runner. The hosted runner did not produce a defensible locked before/after "
+        f"recording pair. Conclusion: **{conclusion}**."
+    )
 report = f"""# Environment
 
 - GitHub Actions runner label: `xcode-27`
@@ -108,7 +125,7 @@ After: `{after_sha}`
 
 # Manual/behavioral-equivalent test
 
-Each revision was built from the exact SHA with the repository's `Tests-UI` scheme. The workflow started the repository's seeded local Home Assistant fixture, onboarded App-Debug through the existing XCUITest flow, and cleared post-onboarding sheets before the test. It then terminated the app, locked the simulator through Simulator's named `Device > Lock Screen` menu, delivered a top-level `entity_id: person.citest` notification with `simctl push`, and used XCUITest to tap that notification in SpringBoard. Because the reported race is intermittent, the baseline was attempted up to five times and the patched revision up to two times, stopping when the expected outcome was observed. `simctl io recordVideo` captured every attempt; the canonical recording is the attempt matching the expected outcome, or the final attempt if none matched. No URL launch substituted for the notification path.
+Each revision was built from the exact SHA with the repository's `Tests-UI` scheme. The workflow started the repository's seeded local Home Assistant fixture, onboarded App-Debug through the existing XCUITest flow, and cleared post-onboarding sheets before the test. It then terminated the app and attempted to lock the headless simulator through simulator-only SpringBoardServices before delivering a top-level `entity_id: person.citest` notification with `simctl push`. No URL launch substituted for the notification path. A lock request alone is not accepted as evidence: both revisions must report a successful verified lock result before behavioral observations can confirm the fix.
 
 # Before result
 
@@ -124,8 +141,7 @@ Concise filtered excerpts are in `before.log` and `after.log`; complete app unif
 
 # Screen recordings
 
-- `before-5964.mov`
-- `after-5964.mov`
+{recordings}
 
 # Conclusion
 
@@ -133,7 +149,7 @@ Concise filtered excerpts are in `before.log` and `after.log`; complete app unif
 
 # Suggested GitHub PR comment
 
-Tested the exact PR base `{before_sha}` and head `{after_sha}` on an Apple-silicon GitHub Actions `xcode-27` runner. See the attached `before-5964.mov` and `after-5964.mov` recordings and `validation-summary.md` for the observed A/B behavior and focused unit-test results. Conclusion: **{conclusion}**.
+{suggested_comment}
 """
 (root / "validation-summary.md").write_text(report)
 print(report)
