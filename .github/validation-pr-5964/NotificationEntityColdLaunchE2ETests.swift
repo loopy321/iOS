@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 final class NotificationEntityColdLaunchE2ETests: XCTestCase {
@@ -42,6 +43,9 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
         let expectedMoreInfo = ProcessInfo.processInfo.environment["EXPECTED_MORE_INFO"] == "true"
         let variant = ProcessInfo.processInfo.environment["TEST_VARIANT"] ?? "unknown"
 
+        let lockReady = lockSimulator()
+        print("PR5964_LOCK_SCREEN_READY=\(lockReady)")
+        XCTAssertTrue(lockReady, "SpringBoardServices could not lock the simulator")
         _ = springboard.wait(for: .runningForeground, timeout: 10)
 
         let title = springboard.staticTexts["HA PR 5964 entity test"].firstMatch
@@ -75,6 +79,23 @@ final class NotificationEntityColdLaunchE2ETests: XCTestCase {
                 ? "The requested CITest More Info dialog did not appear"
                 : "The baseline unexpectedly opened the CITest More Info dialog"
         )
+    }
+
+    private func lockSimulator() -> Bool {
+        let path = "/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices"
+        guard let handle = dlopen(path, RTLD_LAZY) else { return false }
+        defer { dlclose(handle) }
+
+        guard let portSymbol = dlsym(handle, "SBSSpringBoardServerPort"),
+              let lockSymbol = dlsym(handle, "SBSLockDevice") else { return false }
+
+        typealias ServerPort = @convention(c) () -> UInt32
+        typealias LockDevice = @convention(c) (UInt32) -> Int32
+        let serverPort = unsafeBitCast(portSymbol, to: ServerPort.self)
+        let lockDevice = unsafeBitCast(lockSymbol, to: LockDevice.self)
+        let result = lockDevice(serverPort())
+        Thread.sleep(forTimeInterval: 1)
+        return result == 0
     }
 
     private func openNotificationCenter() {

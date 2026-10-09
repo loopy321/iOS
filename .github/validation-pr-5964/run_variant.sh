@@ -257,9 +257,6 @@ if [[ $PREPARATION_STATUS -ne 0 ]]; then
   exit 1
 fi
 
-open "$DEVELOPER_DIR/Applications/Simulator.app" --args -CurrentDeviceUDID "$UDID"
-sleep 3
-
 FULL_LOG="$ARTIFACT_DIR/$VARIANT-full.log"
 xcrun simctl spawn "$UDID" log stream \
   --level debug \
@@ -307,7 +304,7 @@ for ATTEMPT in $(seq 1 "$MAX_BEHAVIOR_ATTEMPTS"); do
 
   TEST_STARTED=false
   for _ in $(seq 1 180); do
-    if grep -q "Start Test at" "$ATTEMPT_LOG" 2>/dev/null; then
+    if grep -q "PR5964_LOCK_SCREEN_READY=true" "$ATTEMPT_LOG" 2>/dev/null; then
       TEST_STARTED=true
       break
     fi
@@ -324,20 +321,8 @@ for ATTEMPT in $(seq 1 "$MAX_BEHAVIOR_ATTEMPTS"); do
   sleep 2
 
   if [[ "$TEST_STARTED" == true ]]; then
-    set +e
-    osascript > "$ARTIFACT_DIR/lock-screen-attempt-$ATTEMPT.log" 2>&1 <<'APPLESCRIPT'
-tell application "System Events"
-  tell process "Simulator"
-    set frontmost to true
-    delay 1
-    click menu item "Lock Screen" of menu "Device" of menu bar 1
-  end tell
-end tell
-APPLESCRIPT
-    LOCK_STATUS=$?
-    set -e
+    LOCK_STATUS=0
     echo "exit_status=$LOCK_STATUS" >> "$ARTIFACT_DIR/lock-screen-attempt-$ATTEMPT.log"
-    sleep 2
     xcrun simctl push "$UDID" "$BUNDLE_ID" .github/e2e/entity-cold-launch.apns \
       > "$ARTIFACT_DIR/simctl-push-attempt-$ATTEMPT.log" 2>&1
   else
